@@ -4,6 +4,7 @@ namespace BendeckDavid\GraphqlClient\Classes;
 
 use Exception;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Http;
 use BendeckDavid\GraphqlClient\Enums\Format;
 use BendeckDavid\GraphqlClient\Enums\Request;
 use BendeckDavid\GraphqlClient\Classes\Mutator;
@@ -16,7 +17,7 @@ class Client extends Mutator {
     public Array $variables = [];
     public Array $rawHeaders = [
         'Content-Type' => 'application/json',
-        'User-Agent' => 'Laravel GraphQL client',
+        'User-Agent' => 'Laravel GraphQL Client',
     ];
     public Array $context = [];
 
@@ -224,12 +225,27 @@ class Client extends Mutator {
     public function makeRequest(string $format)
     {
         try {
-            $result = file_get_contents($this->endpoint, false, $this->request);
+            $result = Http::withHeaders($this->headers)
+                ->when(config('graphqlclient.auth_scheme') == 'bearer', function($http) {
+                    $http->withToken(config('graphqlclient.auth_credentials'));
+                })
+                ->post($this->endpoint, [
+                    'query' => $this->raw_query,
+                    'variables' => $this->variables
+                ]);
+
+            if($result->getStatusCode() != 200)throw new \ErrorException($result->getStatusCode() . ' - ' . $result->getReasonPhrase());
+
+            $response = $result->object();
+            if(isset($response->errors)) {
+                throw new \ErrorException($response->errors[0]->message);
+            }
+
             if ($format == Format::JSON) {
-                $response = json_decode($result, false);
                 return $response->data;
             } else {
-                $response = json_decode($result, true);
+                $response = $result->json();
+
                 return Arr::get($response, "data");
             }
 
